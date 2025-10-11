@@ -69,7 +69,8 @@ class WebSocketServer:
             self, websocket: websockets.ServerConnection):
         """Handle a client connection."""
         try:
-            logger.info(f"Client connected. Total clients: {len(self.clients)}")
+            logger.info(f"Client connected. "
+                        f"Total clients: {len(self.clients) + 1}")
 
             with self.data_lock:
                 for data in self.data.values():
