@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { MarkerManager, MarkerProperties } from "./Markers";
 import {
   BigStaticData,
   CompressedBigStaticData,
@@ -15,8 +14,15 @@ import {
   CompressedSmallStaticData,
   RouteId,
 } from "./Data";
-import "./Map.css";
+import {
+  FilterControl,
+  FilterOverlay,
+  useFilterState,
+  FilterState,
+} from "./Filter";
 import { InfoControl, InfoOverlay } from "./Info";
+import { MarkerManager, MarkerProperties } from "./Markers";
+import "./Map.css";
 
 interface LoadedBigStaticData {
   key: string;
@@ -50,8 +56,9 @@ function updateMarkers(
   map: maplibregl.Map,
   vehicles: Vehicle[],
   markerManager: MarkerManager,
-  highlightedVehicleCriterion: HighlightedVehicleCriterion
-) {
+  highlightedVehicleCriterion: HighlightedVehicleCriterion,
+  filterSelection: Set<RouteId>
+): boolean {
   const source = map.getSource("vehicle-markers") as maplibregl.GeoJSONSource;
   const highlightedSource = map.getSource(
     "highlighted-vehicle-markers"
@@ -71,6 +78,12 @@ function updateMarkers(
       deg = Math.round(vehicle.directionDegrees / 12) * 12;
     } else {
       deg = null;
+    }
+    const highlighted = highlightedVehicleCriterion.isHighlighted(vehicle);
+    const hidden =
+      filterSelection.size > 0 && !filterSelection.has(vehicle.routeId);
+    if (hidden && !highlighted) {
+      return;
     }
     const markerProperties: MarkerProperties = {
       label: vehicle.routeId.toString(),
@@ -94,7 +107,7 @@ function updateMarkers(
     };
     // Display the feature in both sources to avoid flickering.
     features.push(feature);
-    if (highlightedVehicleCriterion.isHighlighted(vehicle)) {
+    if (highlighted) {
       const highlightedMarkerProperties: MarkerProperties = {
         ...markerProperties,
         highlighted: true,
@@ -122,19 +135,33 @@ function updateMarkers(
     type: "FeatureCollection",
     features: highlightedFeatures,
   });
+
+  const anyMarkerVisible =
+    features.length > 0 || highlightedFeatures.length > 0;
+  return anyMarkerVisible;
 }
 
-function updateTrajectories(map: maplibregl.Map, vehicles: Vehicle[]) {
-  const features: GeoJSON.Feature[] = vehicles.map((vehicle) => ({
-    type: "Feature",
-    geometry: {
-      type: "LineString",
-      coordinates: vehicle.lon.map((lon, index) => [lon, vehicle.lat[index]]),
-    },
-    properties: {
-      routeId: vehicle.routeId,
-    },
-  }));
+function updateTrajectories(
+  map: maplibregl.Map,
+  vehicles: Vehicle[],
+  filterSelection: Set<RouteId>
+) {
+  const features: GeoJSON.Feature[] = [];
+  for (const vehicle of vehicles) {
+    if (filterSelection.size > 0 && !filterSelection.has(vehicle.routeId)) {
+      continue;
+    }
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: vehicle.lon.map((lon, index) => [lon, vehicle.lat[index]]),
+      },
+      properties: {
+        routeId: vehicle.routeId,
+      },
+    });
+  }
 
   const source = map.getSource("trajectories") as maplibregl.GeoJSONSource;
   source.setData({
@@ -251,6 +278,15 @@ export function Map() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState<boolean>(false);
   const [showInfo, setShowInfo] = useState<boolean>(false);
+  const [showFilter, setShowFilter] = useState<boolean>(false);
+
+  const [filterState, setFilterState] = useFilterState("zet-filter-state", {
+    selection: new Set(),
+    enabled: false,
+  });
+  const filterStateRef = useRef<FilterState>(filterState);
+  const anyMarkerVisibleRef = useRef<boolean>(true);
+
   const markerManager = useRef<MarkerManager>(new MarkerManager());
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [activeStaticKey, setActiveStaticKey] = useState<string | null>(null);
@@ -262,6 +298,44 @@ export function Map() {
   const highlightedVehicleCriterion = useRef<HighlightedVehicleCriterion>(
     new HighlightedVehicleCriterion()
   );
+  const filterControlRef = useRef<FilterControl | null>(null);
+
+  const redraw = () => {
+    if (
+      mapRef.current == null ||
+      realTimeData.current == null ||
+      filterControlRef.current == null
+    ) {
+      return;
+    }
+    const activeSelection = filterStateRef.current.enabled
+      ? filterStateRef.current.selection
+      : new Set<RouteId>();
+
+    anyMarkerVisibleRef.current = updateMarkers(
+      mapRef.current,
+      realTimeData.current.vehicles,
+      markerManager.current,
+      highlightedVehicleCriterion.current,
+      activeSelection
+    );
+    console.log(
+      "filterStateRef.current",
+      filterStateRef.current,
+      anyMarkerVisibleRef.current
+    );
+    if (filterControlRef.current != null) {
+      filterControlRef.current.updateState(
+        filterStateRef.current,
+        anyMarkerVisibleRef.current
+      );
+    }
+    updateTrajectories(
+      mapRef.current,
+      realTimeData.current.vehicles,
+      activeSelection
+    );
+  };
 
   // Initialize map
   useEffect(() => {
@@ -303,6 +377,18 @@ export function Map() {
     );
 
     map.addControl(new InfoControl(() => setShowInfo(true)));
+    filterControlRef.current = new FilterControl({
+      onShowFilter: () => setShowFilter(true),
+      onToggleFilter: (enabled: boolean) => {
+        console.log("onToggleFilter", enabled);
+        const newFilterState = { ...filterStateRef.current, enabled };
+        setFilterState(newFilterState);
+        filterStateRef.current = newFilterState;
+        redraw();
+      },
+      initialState: filterStateRef.current,
+    });
+    map.addControl(filterControlRef.current, "bottom-right");
 
     // Initialize trajectory source and layer
     map.on("load", () => {
@@ -392,12 +478,7 @@ export function Map() {
           highlightedVehicleCriterion.current.setSelectedRouteId(null);
         }
         if (realTimeData.current != null) {
-          updateMarkers(
-            map,
-            realTimeData.current.vehicles,
-            markerManager.current,
-            highlightedVehicleCriterion.current
-          );
+          redraw();
         }
       });
 
@@ -474,13 +555,7 @@ export function Map() {
         const state: RealTimeState = decompressRealTimeState(data);
         realTimeData.current = state;
         if (mapRef.current) {
-          updateMarkers(
-            mapRef.current,
-            state.vehicles,
-            markerManager.current,
-            highlightedVehicleCriterion.current
-          );
-          updateTrajectories(mapRef.current, state.vehicles);
+          redraw();
         }
         setActiveStaticKey(state.activeStaticKey);
       });
@@ -523,10 +598,37 @@ export function Map() {
     };
   }, [mapLoaded]);
 
+  const onFilterSelectionChange = (newSelection: Set<RouteId>) => {
+    const newFilterState = {
+      selection: newSelection,
+      enabled: filterStateRef.current.enabled || newSelection.size > 0,
+    };
+    setFilterState(newFilterState);
+    filterStateRef.current = newFilterState;
+    redraw();
+  };
+
+  useEffect(() => {
+    if (filterControlRef.current != null) {
+      filterControlRef.current.updateState(
+        filterState,
+        anyMarkerVisibleRef.current
+      );
+    }
+  }, [filterState]);
+
   return (
     <>
       <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
       {showInfo && <InfoOverlay onClose={() => setShowInfo(false)} />}
+      {showFilter && (
+        <FilterOverlay
+          onClose={() => setShowFilter(false)}
+          smallStaticData={loadedSmallStaticData?.data}
+          selection={filterState.selection}
+          onSelectionChange={onFilterSelectionChange}
+        />
+      )}
     </>
   );
 }
