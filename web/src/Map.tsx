@@ -363,11 +363,6 @@ export function Map() {
     map.touchZoomRotate.disableRotation();
 
     map.addControl(
-      new maplibregl.NavigationControl({
-        showCompass: false,
-      })
-    );
-    map.addControl(
       new maplibregl.GeolocateControl({
         positionOptions: {
           enableHighAccuracy: true,
