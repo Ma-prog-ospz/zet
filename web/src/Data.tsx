@@ -1,4 +1,5 @@
 export type ShapeId = string;
+export type RouteId = number;
 
 export interface Shape {
   id: ShapeId;
@@ -6,8 +7,12 @@ export interface Shape {
   lons: number[];
 }
 
-export interface StaticData {
+export interface BigStaticData {
   shapes: { [key: ShapeId]: Shape };
+}
+
+export interface SmallStaticData {
+  routeIds: RouteId[];
 }
 
 interface CompressedShapes {
@@ -16,12 +21,20 @@ interface CompressedShapes {
   compressedLons: number[][];
 }
 
-export interface CompressedStaticData {
+interface CompressedRoutes {
+  ids: RouteId[];
+}
+
+export interface CompressedBigStaticData {
   shapes: CompressedShapes;
 }
 
+export interface CompressedSmallStaticData {
+  routes: CompressedRoutes;
+}
+
 export interface Vehicle {
-  routeId: number;
+  routeId: RouteId;
   shapeId: ShapeId;
   lat: number[];
   lon: number[];
@@ -35,7 +48,7 @@ export interface RealTimeState {
 }
 
 export interface CompressedVehicles {
-  routeIds: number[];
+  routeIds: RouteId[];
   shapeIds: ShapeId[];
   timestamps: number[];
   compressedLats: number[][];
@@ -83,7 +96,7 @@ const STATIC_REFERENCE_SYSTEM = new StaticReferenceSystem(6, 45.815, 15.9819);
 
 function decompressVehicles(data: CompressedVehicles): Vehicle[] {
   const vehicles: Vehicle[] = [];
-  for (let i = 0; i < data.routeIds.length; i++) {
+  for (let i = 0, n = data.routeIds.length; i < n; ++i) {
     vehicles.push({
       routeId: data.routeIds[i],
       shapeId: data.shapeIds[i],
@@ -105,9 +118,11 @@ export function decompressRealTimeState(
   };
 }
 
-export function decompressStaticData(data: CompressedStaticData): StaticData {
+export function decompressBigStaticData(
+  data: CompressedBigStaticData
+): BigStaticData {
   const shapes: { [key: ShapeId]: Shape } = {};
-  for (let i = 0; i < data.shapes.ids.length; i++) {
+  for (let i = 0, n = data.shapes.ids.length; i < n; ++i) {
     const shapeId = data.shapes.ids[i];
     shapes[shapeId] = {
       id: shapeId,
@@ -120,4 +135,12 @@ export function decompressStaticData(data: CompressedStaticData): StaticData {
     };
   }
   return { shapes };
+}
+
+export function decompressSmallStaticData(
+  data: CompressedSmallStaticData
+): SmallStaticData {
+  return {
+    routeIds: data.routes.ids,
+  };
 }

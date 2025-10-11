@@ -3,20 +3,29 @@ import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { MarkerManager, MarkerProperties } from "./Markers";
 import {
-  StaticData,
-  CompressedStaticData,
+  BigStaticData,
+  CompressedBigStaticData,
   Vehicle,
   CompressedRealTimeState,
   decompressRealTimeState,
   RealTimeState,
-  decompressStaticData,
+  decompressBigStaticData,
+  SmallStaticData,
+  decompressSmallStaticData,
+  CompressedSmallStaticData,
+  RouteId,
 } from "./Data";
 import "./Map.css";
 import { InfoControl, InfoOverlay } from "./Info";
 
-interface LoadedStaticData {
+interface LoadedBigStaticData {
   key: string;
-  data: StaticData;
+  data: BigStaticData;
+}
+
+interface LoadedSmallStaticData {
+  key: string;
+  data: SmallStaticData;
 }
 
 function getUrl(schema: string, secureSchema: string, path: string) {
@@ -26,9 +35,9 @@ function getUrl(schema: string, secureSchema: string, path: string) {
 }
 
 class HighlightedVehicleCriterion {
-  private routeId: number | null = null;
+  private routeId: RouteId | null = null;
 
-  setSelectedRouteId(routeId: number | null) {
+  setSelectedRouteId(routeId: RouteId | null) {
     this.routeId = routeId;
   }
 
@@ -134,19 +143,26 @@ function updateTrajectories(map: maplibregl.Map, vehicles: Vehicle[]) {
   });
 }
 
-async function fetchStaticData(key: string) {
+async function fetchBigStaticData(key: string) {
   const url = getUrl("http", "https", `static/${key}`);
   const response = await fetch(url);
-  const compressedStaticData: CompressedStaticData = await response.json();
-  return decompressStaticData(compressedStaticData);
+  const compressedData: CompressedBigStaticData = await response.json();
+  return decompressBigStaticData(compressedData);
+}
+
+async function fetchSmallStaticData(key: string) {
+  const url = getUrl("http", "https", `static/small/v0/${key}`);
+  const response = await fetch(url);
+  const compressedData: CompressedSmallStaticData = await response.json();
+  return decompressSmallStaticData(compressedData);
 }
 
 async function updateSelectedShape(
   map: maplibregl.Map,
   selectedShapeId: string | null,
-  loadedStaticData: LoadedStaticData | null,
+  loadedBigStaticData: LoadedBigStaticData | null,
   activeStaticKey: string,
-  setLoadedStaticData: (data: LoadedStaticData) => void
+  setLoadedBigStaticData: (data: LoadedBigStaticData) => void
 ) {
   const source = map.getSource("selected-shape") as maplibregl.GeoJSONSource;
 
@@ -157,14 +173,17 @@ async function updateSelectedShape(
     });
     return null;
   }
-  let staticData: StaticData;
-  if (loadedStaticData == null || loadedStaticData.key !== activeStaticKey) {
-    staticData = await fetchStaticData(activeStaticKey);
-    setLoadedStaticData({ key: activeStaticKey, data: staticData });
+  let bigStaticData: BigStaticData;
+  if (
+    loadedBigStaticData == null ||
+    loadedBigStaticData.key !== activeStaticKey
+  ) {
+    bigStaticData = await fetchBigStaticData(activeStaticKey);
+    setLoadedBigStaticData({ key: activeStaticKey, data: bigStaticData });
   } else {
-    staticData = loadedStaticData.data;
+    bigStaticData = loadedBigStaticData.data;
   }
-  const shape = staticData.shapes[selectedShapeId];
+  const shape = bigStaticData.shapes[selectedShapeId];
   let features: GeoJSON.Feature[] = [];
   if (shape != null) {
     // Draw a polyline from the first shape point to the last shape point.
@@ -235,8 +254,10 @@ export function Map() {
   const markerManager = useRef<MarkerManager>(new MarkerManager());
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [activeStaticKey, setActiveStaticKey] = useState<string | null>(null);
-  const [loadedStaticData, setLoadedStaticData] =
-    useState<LoadedStaticData | null>(null);
+  const [loadedBigStaticData, setLoadedBigStaticData] =
+    useState<LoadedBigStaticData | null>(null);
+  const [loadedSmallStaticData, setLoadedSmallStaticData] =
+    useState<LoadedSmallStaticData | null>(null);
   const realTimeData = useRef<RealTimeState | null>(null);
   const highlightedVehicleCriterion = useRef<HighlightedVehicleCriterion>(
     new HighlightedVehicleCriterion()
@@ -405,11 +426,25 @@ export function Map() {
     updateSelectedShape(
       mapRef.current,
       selectedShapeId,
-      loadedStaticData,
+      loadedBigStaticData,
       activeStaticKey,
-      setLoadedStaticData
+      setLoadedBigStaticData
     );
-  }, [selectedShapeId, activeStaticKey, loadedStaticData]);
+  }, [selectedShapeId, activeStaticKey, loadedBigStaticData]);
+
+  useEffect(() => {
+    if (activeStaticKey == null) {
+      return;
+    }
+    if (
+      loadedSmallStaticData == null ||
+      loadedSmallStaticData.key !== activeStaticKey
+    ) {
+      fetchSmallStaticData(activeStaticKey).then((data: SmallStaticData) => {
+        setLoadedSmallStaticData({ key: activeStaticKey, data: data });
+      });
+    }
+  }, [activeStaticKey, loadedSmallStaticData]);
 
   // WebSocket connection and updates with reconnection logic
   useEffect(() => {
@@ -426,7 +461,7 @@ export function Map() {
       }
 
       // Manually change to the dev websocket server port in http.
-      const url = getUrl("ws", "wss", "ws-v1");
+      const url = getUrl("ws", "wss", "ws-v2");
       ws = new WebSocket(url);
 
       ws.addEventListener("open", () => {

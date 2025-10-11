@@ -30,6 +30,7 @@ DIRECTION_THRESHOLD_METERS = 20
 
 TripId = str
 ShapeId = str
+RouteId = int
 
 app = Flask(__name__, static_folder='../static')
 if os.environ.get('ZET_DEV') == '1':
@@ -276,7 +277,15 @@ class RealtimeState:
             'vehicles': Vehicle.to_compressed_json(vehicles, ref),
             'timestamp': self.timestamp,
             'activeStaticKey': self.active_static_key,
+            # Backwards compatibility (there was supposed to be a version bump
+            # after renaming this field...)
+            'latestStaticKey': self.active_static_key,
         }
+
+    def json_v1_to_json_v2(self, data: dict):
+        data = dict(data)
+        del data['latestStaticKey']
+        return data
 
 
 @dataclass
@@ -292,12 +301,15 @@ class WsClient:
 class WsOutputMessageVariants:
     version0: str
     version1: str
+    version2: str
 
     @staticmethod
     def from_realtime_state(state: RealtimeState) -> 'WsOutputMessageVariants':
+        json_v1 = state.to_json_v1()
         return WsOutputMessageVariants(
             version0=compact_json(state.to_json_v0()),
-            version1=compact_json(state.to_json_v1()),
+            version1=compact_json(json_v1),
+            version2=compact_json(state.json_v1_to_json_v2(json_v1)),
         )
 
     def for_version(self, version: int) -> str:
@@ -306,8 +318,10 @@ class WsOutputMessageVariants:
                 return self.version0
             case 1:
                 return self.version1
+            case 2:
+                return self.version2
             case _:
-                return self.version1
+                return self.version2
 
 
 @dataclass
@@ -332,6 +346,7 @@ class GtfsShape:
 class StaticData:
     trip_to_shape_id: dict[TripId, ShapeId]
     shapes: dict[ShapeId, GtfsShape]
+    route_ids: list[RouteId]
     # TODO: Store and check ServiceId
     calendar_dates: set[datetime.date]
 
@@ -377,6 +392,19 @@ class StaticData:
                         logger.error(f"Error parsing calendar_dates.txt: {e}")
                         pass
 
+            route_ids: list[RouteId] = []
+            with zip_file.open('routes.txt') as file:
+                csv_lines = file.read().decode('utf-8').splitlines()
+                reader = csv.DictReader(csv_lines)
+                for row in reader:
+                    try:
+                        route_id = int(row['route_id'])
+                    except ValueError:
+                        logger.warning(
+                                f"Error parsing route_id: {row['route_id']}")
+                        continue
+                    route_ids.append(route_id)
+
         shapes: dict[str, GtfsShape] = {}
         for shape_id, shape_points in unsorted_shapes.items():
             shape_points.sort(key=lambda x: x[2])
@@ -387,13 +415,22 @@ class StaticData:
             )
 
         return StaticData(trip_to_shape_id=trip_to_shape_id, shapes=shapes,
-                          calendar_dates=calendar_dates)
+                          route_ids=route_ids, calendar_dates=calendar_dates)
 
-    def to_json(self, ref: StaticReferenceSystem) -> dict:
+    def big_to_json(self, ref: StaticReferenceSystem) -> dict:
+        """Large data, loaded on demand."""
         # No need to export the trip_id to the client.
         return {
             'shapes': GtfsShape.to_compressed_json(
                 list(self.shapes.values()), ref),
+        }
+
+    def small_to_json(self) -> dict:
+        """Small data that is loaded immediately when the page is loaded."""
+        return {
+            'routes': {
+                'ids': self.route_ids,
+            },
         }
 
 
@@ -401,7 +438,8 @@ class StaticData:
 class StaticDataSnapshot:
     key: str
     static_data: StaticData
-    formatted_json: str
+    formatted_json_big: str
+    formatted_json_small: str
 
 
 def compact_json(json_data: dict | list) -> str:
@@ -484,11 +522,13 @@ class GtfsServer:
             key = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M')
             static_data = StaticData.from_gzipped_data(
                 bytes.fromhex(data['gzipped_data']))
-            json_data = static_data.to_json(STATIC_REFERENCE_SYSTEM)
+            json_data_big = static_data.big_to_json(STATIC_REFERENCE_SYSTEM)
+            json_data_small = static_data.small_to_json()
             snapshot = StaticDataSnapshot(
                 key=key,
                 static_data=static_data,
-                formatted_json=compact_json(json_data),
+                formatted_json_big=compact_json(json_data_big),
+                formatted_json_small=compact_json(json_data_small),
             )
             with self.update_lock:
                 self.recent_static_snapshots.append(snapshot)
@@ -548,10 +588,16 @@ class GtfsServer:
             self.ws_clients -= dead_clients
             self._send_time = time.time() - start_time
 
-    def handle_static_data_request(self, key: str) -> tuple[str, int]:
+    def handle_big_static_data_request(self, key: str) -> tuple[str, int]:
         for snapshot in self.recent_static_snapshots:
             if snapshot.key == key:
-                return snapshot.formatted_json, 200
+                return snapshot.formatted_json_big, 200
+        return "Static data not found", 404
+
+    def handle_small_static_data_request(self, key: str) -> tuple[str, int]:
+        for snapshot in self.recent_static_snapshots:
+            if snapshot.key == key:
+                return snapshot.formatted_json_small, 200
         return "Static data not found", 404
 
 
@@ -590,12 +636,28 @@ def websocket_v1(ws: simple_websocket.ws.Server):
     handle_websocket(ws, version=1)
 
 
+@sock.route('/ws-v2')
+def websocket_v2(ws: simple_websocket.ws.Server):
+    """v2 only removes the redundant duplicate backward-compatibility key
+    latestStaticKey."""
+    handle_websocket(ws, version=2)
+
+
 @app.route('/static/<key>')
-def static_data(key: str):
+def static_data_big(key: str):
     if gtfs_server is None:
         raise Exception("gtfs_server is not initialized")
-    json_data, status = gtfs_server.handle_static_data_request(key)
-    cache_control = 'public, max-age=31536000' if status == 200 else 'no-cache'
+    json_data, status = gtfs_server.handle_big_static_data_request(key)
+    cache_control = 'public, max-age=5184000' if status == 200 else 'no-cache'
+    return json_data, status, {'Cache-Control': cache_control}
+
+
+@app.route('/static/small/v0/<key>')
+def static_data_small(key: str):
+    if gtfs_server is None:
+        raise Exception("gtfs_server is not initialized")
+    json_data, status = gtfs_server.handle_small_static_data_request(key)
+    cache_control = 'public, max-age=5184000' if status == 200 else 'no-cache'
     return json_data, status, {'Cache-Control': cache_control}
 
 
