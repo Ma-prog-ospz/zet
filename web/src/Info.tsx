@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Overlay } from "./Overlay";
 
 // SVG content from maplibre-gl/src/css/svg/maplibregl-ctrl-attrib.svg
 const infoIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill-rule="evenodd" viewBox="0 0 20 20" style="fill: #444; margin-top: 2px;">
@@ -19,71 +19,44 @@ function ExternalLink(props: { href: string; children: React.ReactNode }) {
 }
 
 export function InfoOverlay({ onClose }: { onClose: () => void }) {
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [onClose]);
-
-  const handleBackgroundClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      onClose();
-    }
-  };
-
   return (
-    <div className="attribution-overlay" onClick={handleBackgroundClick}>
-      <div className="attribution-content">
-        <button className="close-button" onClick={onClose}>
-          ✕
-        </button>
-        <h3>ZET uživo</h3>
-        <p>
-          <i>Napomena: Prikazivanje trasa vozila je eksperimentalno!</i>
-        </p>
-        <p>
-          Sadrži informacije tijela javne vlasti u skladu s{" "}
-          <ExternalLink href="https://data.gov.hr/otvorena-dozvola">
-            Otvorenom dozvolom
-          </ExternalLink>
-          .<br />
-          Podaci o vozilima:{" "}
-          <ExternalLink href="https://www.zet.hr/odredbe/datoteke-u-gtfs-formatu/669">
-            ZET GTFS
-          </ExternalLink>
-        </p>
-        <p>
-          Interaktivna karta:{" "}
-          <ExternalLink href="https://maplibre.org/">
-            MapLibre GL JS
-          </ExternalLink>
-        </p>
-        <p>
-          Podaci za kartu:{" "}
-          <ExternalLink href="https://openfreemap.org/">
-            OpenFreeMap
-          </ExternalLink>
-          {" | "}
-          <ExternalLink href="https://openmaptiles.org/">
-            OpenMapTiles
-          </ExternalLink>
-          {" | "}
-          <ExternalLink href="https://www.openstreetmap.org/">
-            OpenStreetMap
-          </ExternalLink>
-        </p>
-        <p>
-          Izvorni kod:{" "}
-          <ExternalLink href="https://github.com/ikicic/zet">
-            GitHub
-          </ExternalLink>
-        </p>
-      </div>
-    </div>
+    <Overlay onClose={onClose}>
+      <h3>ZET uživo</h3>
+      <p>
+        <i>Napomena: Prikazivanje trasa vozila je eksperimentalno!</i>
+      </p>
+      <p>
+        Sadrži informacije tijela javne vlasti u skladu s{" "}
+        <ExternalLink href="https://data.gov.hr/otvorena-dozvola">
+          Otvorenom dozvolom
+        </ExternalLink>
+        .<br />
+        Podaci o vozilima:{" "}
+        <ExternalLink href="https://www.zet.hr/odredbe/datoteke-u-gtfs-formatu/669">
+          ZET GTFS
+        </ExternalLink>
+      </p>
+      <p>
+        Interaktivna karta:{" "}
+        <ExternalLink href="https://maplibre.org/">MapLibre GL JS</ExternalLink>
+      </p>
+      <p>
+        Podaci za kartu:{" "}
+        <ExternalLink href="https://openfreemap.org/">OpenFreeMap</ExternalLink>
+        {" | "}
+        <ExternalLink href="https://openmaptiles.org/">
+          OpenMapTiles
+        </ExternalLink>
+        {" | "}
+        <ExternalLink href="https://www.openstreetmap.org/">
+          OpenStreetMap
+        </ExternalLink>
+      </p>
+      <p>
+        Izvorni kod:{" "}
+        <ExternalLink href="https://github.com/ikicic/zet">GitHub</ExternalLink>
+      </p>
+    </Overlay>
   );
 }
 
