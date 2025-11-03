@@ -16,6 +16,8 @@ import signal
 import sqlite3
 import time
 import zipfile
+import logging
+logging.getLogger("websockets.server").setLevel(logging.ERROR)
 
 from google.transit import gtfs_realtime_pb2
 from google.protobuf.json_format import MessageToDict
