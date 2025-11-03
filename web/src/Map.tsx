@@ -34,10 +34,11 @@ interface LoadedSmallStaticData {
   data: SmallStaticData;
 }
 
+// Get URL based on whether it's in production or development
 function getUrl(schema: string, secureSchema: string, path: string) {
   return window.location.protocol === "https:"
-    ? `${secureSchema}://${window.location.host}/${path}`
-    : `${schema}://${window.location.hostname}:5000/${path}`;
+    ? `${secureSchema}://${window.location.host}/${path}` // For HTTPS, use wss
+    : `${schema}://${window.location.hostname}:5000/${path}`; // For HTTP, use ws on port 5000
 }
 
 class HighlightedVehicleCriterion {
@@ -52,6 +53,7 @@ class HighlightedVehicleCriterion {
   }
 }
 
+// Update vehicle markers
 function updateMarkers(
   map: maplibregl.Map,
   vehicles: Vehicle[],
@@ -141,6 +143,7 @@ function updateMarkers(
   return anyMarkerVisible;
 }
 
+// Update the vehicle trajectories
 function updateTrajectories(
   map: maplibregl.Map,
   vehicles: Vehicle[],
@@ -170,6 +173,7 @@ function updateTrajectories(
   });
 }
 
+// Fetch big static data
 async function fetchBigStaticData(key: string) {
   const url = getUrl("http", "https", `static/${key}`);
   const response = await fetch(url);
@@ -177,6 +181,7 @@ async function fetchBigStaticData(key: string) {
   return decompressBigStaticData(compressedData);
 }
 
+// Fetch small static data
 async function fetchSmallStaticData(key: string) {
   const url = getUrl("http", "https", `static/small/v0/${key}`);
   const response = await fetch(url);
@@ -184,6 +189,7 @@ async function fetchSmallStaticData(key: string) {
   return decompressSmallStaticData(compressedData);
 }
 
+// Update the selected shape on the map
 async function updateSelectedShape(
   map: maplibregl.Map,
   selectedShapeId: string | null,
@@ -228,6 +234,7 @@ async function updateSelectedShape(
   source.setData({ type: "FeatureCollection", features: features });
 }
 
+// Check if click is within the marker
 function isWithinMarker(
   map: maplibregl.Map,
   markerManager: MarkerManager,
@@ -252,13 +259,13 @@ function isWithinMarker(
   return markerShape.isWithinShape(dx, dy);
 }
 
+// Find the selected marker feature
 function findSelectedMarkerFeature(
   map: maplibregl.Map,
   markerManager: MarkerManager,
   features: GeoJSON.Feature[],
   clickPoint: { x: number; y: number }
 ): GeoJSON.Feature | null {
-  // Select the feature with the highest zOrder.
   let topFeature: GeoJSON.Feature | null = null;
   let topZOrder: number | null = null;
   for (const feature of features) {
@@ -415,7 +422,6 @@ export function Map() {
         },
       });
 
-      // Render markers as symbols with various dynamically created images.
       map.addLayer({
         id: "vehicle-markers",
         type: "symbol",
@@ -427,7 +433,7 @@ export function Map() {
           "symbol-sort-key": ["get", "zOrder"],
         },
       });
-      // Hopefully this disabled symbol fade in/out.
+
       map.setPaintProperty("vehicle-markers", "icon-opacity", 1.0);
 
       map.addLayer({
@@ -440,7 +446,6 @@ export function Map() {
         },
       });
 
-      // Highlighted vehicles on top of the other vehicles.
       map.addLayer({
         id: "highlighted-vehicle-markers",
         type: "symbol",
@@ -477,7 +482,6 @@ export function Map() {
         }
       });
 
-      // TODO: Precisely check whether the mouse cursor is over a marker.
       map.on("mouseenter", "vehicle-markers", () => {
         map.getCanvas().style.cursor = "pointer";
       });
@@ -521,77 +525,6 @@ export function Map() {
       });
     }
   }, [activeStaticKey, loadedSmallStaticData]);
-
-  // WebSocket connection and updates with reconnection logic
-  useEffect(() => {
-    if (!mapLoaded) {
-      return; // Do not open the websocket yet.
-    }
-    let ws: WebSocket | null = null;
-    let reconnectAttempts = 0;
-    let isMounted = true; // Flag to track if component is still mounted
-
-    const connectWebSocket = () => {
-      if (!isMounted) {
-        return;
-      }
-
-      // Manually change to the dev websocket server port in http.
-      const url = getUrl("ws", "wss", "ws-v2");
-      ws = new WebSocket(url);
-
-      ws.addEventListener("open", () => {
-        console.log("WebSocket connection established");
-        reconnectAttempts = 0; // Reset attempts on successful connection
-      });
-
-      ws.addEventListener("message", (event) => {
-        const data: CompressedRealTimeState = JSON.parse(event.data);
-        const state: RealTimeState = decompressRealTimeState(data);
-        realTimeData.current = state;
-        if (mapRef.current) {
-          redraw();
-        }
-        setActiveStaticKey(state.activeStaticKey);
-      });
-
-      ws.addEventListener("close", () => {
-        console.log("WebSocket connection closed");
-        if (isMounted) {
-          // Only reconnect if component is still mounted
-          reconnectWithBackoff();
-        }
-      });
-
-      ws.addEventListener("error", (error) => {
-        console.error("WebSocket error:", error);
-        ws?.close();
-      });
-    };
-
-    const reconnectWithBackoff = () => {
-      if (!isMounted) {
-        return;
-      }
-
-      const delay = Math.min(1000 + 1000 * reconnectAttempts, 5000);
-      setTimeout(() => {
-        if (!isMounted) {
-          return;
-        }
-        ++reconnectAttempts;
-        console.log(`Reconnecting... Attempt #${reconnectAttempts}`);
-        connectWebSocket();
-      }, delay);
-    };
-
-    connectWebSocket();
-
-    return () => {
-      isMounted = false; // Do not reconnect anymore.
-      ws?.close();
-    };
-  }, [mapLoaded]);
 
   const onFilterSelectionChange = (newSelection: Set<RouteId>) => {
     const newFilterState = {
