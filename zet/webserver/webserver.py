@@ -3,6 +3,7 @@ import sys
 import threading
 import logging
 import argparse
+import json
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_sock import Sock
@@ -15,6 +16,7 @@ from zet.fetcher.fetcher import Fetcher
 
 # --- Flask setup ---
 app = Flask(__name__, static_folder="../static")
+
 if os.environ.get("ZET_DEV") == "1":
     CORS(app, origins=["https://zet-6shc.onrender.com"])
 else:
@@ -41,11 +43,31 @@ def create_parser():
         help="Interval between static fetches (seconds)")
     add("--dir", default=".",
         help="Directory to store snapshots")
-    add("--ws-port", type=int, default=8765,
-        help="WebSocket server port (default: 8765)")
     add("--port", type=int, default=5000,
         help="Flask server port (default: 5000)")
     return parser
+
+
+# --- WebSocket ruta (Render friendly) ---
+@sock.route('/ws')
+def ws_handler(ws):
+    logger.info("✅ WebSocket client connected.")
+    while True:
+        try:
+            if fetcher_instance and fetcher_instance.latest_data:
+                # Pretpostavka: fetcher_instance.latest_data je dict s GTFS podacima
+                ws.send(json.dumps(fetcher_instance.latest_data))
+            else:
+                ws.send(json.dumps({"status": "waiting for data"}))
+        except Exception as e:
+            logger.error(f"❌ WebSocket closed: {e}")
+            break
+
+
+# --- Jednostavan endpoint za provjeru ---
+@app.route("/")
+def index():
+    return jsonify({"status": "✅ GTFS Fetcher running!", "websocket": "/ws"})
 
 
 # --- Main function ---
@@ -60,7 +82,6 @@ def main():
         realtime_dt=args.realtime_dt,
         static_dt=args.static_dt,
         db_dir=args.dir,
-        ws_port=args.ws_port,
     )
 
     # Pokreni Fetcher u pozadini
@@ -69,13 +90,8 @@ def main():
 
     # Render traži da koristiš port iz env varijable PORT
     port = int(os.environ.get("PORT", args.port))
+    logger.info(f"🌍 Starting Flask on 0.0.0.0:{port}")
     app.run(host="0.0.0.0", port=port)
-
-
-# --- Jednostavan endpoint za provjeru ---
-@app.route("/")
-def index():
-    return jsonify({"status": "✅ GTFS Fetcher running!", "ws_port": 8765})
 
 
 if __name__ == "__main__":
