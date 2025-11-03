@@ -4,10 +4,10 @@ import threading
 import logging
 import argparse
 import json
-from flask import send_from_directory
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_sock import Sock
+app = Flask(__name__, static_folder='../public')
 
 @app.route("/style.json")
 def serve_style():
@@ -70,10 +70,9 @@ def ws_handler(ws):
 
 
 # --- Jednostavan endpoint za provjeru ---
-@app.route("/")
+@app.route('/')
 def index():
-    return jsonify({"status": "✅ GTFS Fetcher running!", "websocket": "/ws"})
-
+    return send_from_directory(app.static_folder, 'index.html')
 
 # --- Main function ---
 def main():
@@ -100,4 +99,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(), app.run(debug=True)
