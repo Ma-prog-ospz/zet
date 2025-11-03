@@ -24,6 +24,13 @@ import { InfoControl, InfoOverlay } from "./Info";
 import { MarkerManager, MarkerProperties } from "./Markers";
 import "./Map.css";
 
+// Helper function to get URLs dynamically based on protocol
+function getUrl(schema: string, secureSchema: string, path: string) {
+  return window.location.protocol === "https:"
+    ? `${secureSchema}://${window.location.host}/${path}` // Use wss for HTTPS
+    : `${schema}://${window.location.hostname}:5000/${path}`; // Use ws for HTTP
+}
+
 interface LoadedBigStaticData {
   key: string;
   data: BigStaticData;
@@ -34,13 +41,7 @@ interface LoadedSmallStaticData {
   data: SmallStaticData;
 }
 
-// Get URL based on whether it's in production or development
-function getUrl(schema: string, secureSchema: string, path: string) {
-  return window.location.protocol === "https:"
-    ? `${secureSchema}://${window.location.host}/${path}` // For HTTPS, use wss
-    : `${schema}://${window.location.hostname}:5000/${path}`; // For HTTP, use ws on port 5000
-}
-
+// This class helps in selecting and highlighting a vehicle by its RouteId
 class HighlightedVehicleCriterion {
   private routeId: RouteId | null = null;
 
@@ -53,7 +54,7 @@ class HighlightedVehicleCriterion {
   }
 }
 
-// Update vehicle markers
+// Function to update markers on the map
 function updateMarkers(
   map: maplibregl.Map,
   vehicles: Vehicle[],
@@ -74,7 +75,6 @@ function updateMarkers(
       vehicle.lat[vehicle.lat.length - 1],
     ];
 
-    // Round the angle, for memory AND performance reasons.
     let deg;
     if (vehicle.directionDegrees != null) {
       deg = Math.round(vehicle.directionDegrees / 12) * 12;
@@ -107,7 +107,6 @@ function updateMarkers(
         zOrder: -vehicle.routeId,
       },
     };
-    // Display the feature in both sources to avoid flickering.
     features.push(feature);
     if (highlighted) {
       const highlightedMarkerProperties: MarkerProperties = {
@@ -143,7 +142,7 @@ function updateMarkers(
   return anyMarkerVisible;
 }
 
-// Update the vehicle trajectories
+// Function to update vehicle trajectories
 function updateTrajectories(
   map: maplibregl.Map,
   vehicles: Vehicle[],
@@ -173,7 +172,7 @@ function updateTrajectories(
   });
 }
 
-// Fetch big static data
+// Fetch big static data from the server
 async function fetchBigStaticData(key: string) {
   const url = getUrl("http", "https", `static/${key}`);
   const response = await fetch(url);
@@ -181,7 +180,7 @@ async function fetchBigStaticData(key: string) {
   return decompressBigStaticData(compressedData);
 }
 
-// Fetch small static data
+// Fetch small static data from the server
 async function fetchSmallStaticData(key: string) {
   const url = getUrl("http", "https", `static/small/v0/${key}`);
   const response = await fetch(url);
@@ -189,7 +188,7 @@ async function fetchSmallStaticData(key: string) {
   return decompressSmallStaticData(compressedData);
 }
 
-// Update the selected shape on the map
+// Update selected shape when clicked
 async function updateSelectedShape(
   map: maplibregl.Map,
   selectedShapeId: string | null,
@@ -219,7 +218,6 @@ async function updateSelectedShape(
   const shape = bigStaticData.shapes[selectedShapeId];
   let features: GeoJSON.Feature[] = [];
   if (shape != null) {
-    // Draw a polyline from the first shape point to the last shape point.
     features = [
       {
         type: "Feature",
@@ -234,52 +232,7 @@ async function updateSelectedShape(
   source.setData({ type: "FeatureCollection", features: features });
 }
 
-// Check if click is within the marker
-function isWithinMarker(
-  map: maplibregl.Map,
-  markerManager: MarkerManager,
-  feature: GeoJSON.Feature,
-  clickPoint: { x: number; y: number }
-): boolean {
-  const coordinates = (feature.geometry as GeoJSON.Point).coordinates;
-  const markerPixel = map.project({
-    lng: coordinates[0],
-    lat: coordinates[1],
-  });
-  const dx = clickPoint.x - markerPixel.x;
-  const dy = clickPoint.y - markerPixel.y;
-  const markerKey = feature.properties?.markerKey;
-  if (markerKey == null) {
-    return false;
-  }
-  const markerShape = markerManager.getMarkerShape(markerKey);
-  if (markerShape == null) {
-    return false;
-  }
-  return markerShape.isWithinShape(dx, dy);
-}
-
-// Find the selected marker feature
-function findSelectedMarkerFeature(
-  map: maplibregl.Map,
-  markerManager: MarkerManager,
-  features: GeoJSON.Feature[],
-  clickPoint: { x: number; y: number }
-): GeoJSON.Feature | null {
-  let topFeature: GeoJSON.Feature | null = null;
-  let topZOrder: number | null = null;
-  for (const feature of features) {
-    if (topZOrder != null && feature.properties?.zOrder < topZOrder) {
-      continue;
-    }
-    if (isWithinMarker(map, markerManager, feature, clickPoint)) {
-      topFeature = feature;
-      topZOrder = feature.properties?.zOrder;
-    }
-  }
-  return topFeature;
-}
-
+// Initialize the map and set up layers, sources, and interactions
 export function Map() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -302,9 +255,7 @@ export function Map() {
   const [loadedSmallStaticData, setLoadedSmallStaticData] =
     useState<LoadedSmallStaticData | null>(null);
   const realTimeData = useRef<RealTimeState | null>(null);
-  const highlightedVehicleCriterion = useRef<HighlightedVehicleCriterion>(
-    new HighlightedVehicleCriterion()
-  );
+  const highlightedVehicleCriterion = useRef<HighlightedVehicleCriterion>(new HighlightedVehicleCriterion());
   const filterControlRef = useRef<FilterControl | null>(null);
 
   const redraw = () => {
@@ -325,11 +276,6 @@ export function Map() {
       markerManager.current,
       highlightedVehicleCriterion.current,
       activeSelection
-    );
-    console.log(
-      "filterStateRef.current",
-      filterStateRef.current,
-      anyMarkerVisibleRef.current
     );
     if (filterControlRef.current != null) {
       filterControlRef.current.updateState(
@@ -353,7 +299,7 @@ export function Map() {
     const center: [number, number] = [15.9819, 45.815];
     const map = (mapRef.current = new maplibregl.Map({
       container: mapContainer.current,
-      style: "/style.json",
+      style: "/style.json", // Load the map style from a static JSON file
       center: center,
       zoom: 12,
       minZoom: 9,
@@ -382,7 +328,6 @@ export function Map() {
     filterControlRef.current = new FilterControl({
       onShowFilter: () => setShowFilter(true),
       onToggleFilter: (enabled: boolean) => {
-        console.log("onToggleFilter", enabled);
         const newFilterState = { ...filterStateRef.current, enabled };
         setFilterState(newFilterState);
         filterStateRef.current = newFilterState;
@@ -392,11 +337,8 @@ export function Map() {
     });
     map.addControl(filterControlRef.current, "bottom-right");
 
-    // Initialize trajectory source and layer
     map.on("load", () => {
-      if (!map) {
-        return;
-      }
+      if (!map) return;
 
       const emptyGeoJSON: maplibregl.GeoJSONSourceSpecification = {
         type: "geojson",
@@ -493,57 +435,10 @@ export function Map() {
       setMapLoaded(true);
     });
 
-    // Cleanup
     return () => {
       map.remove();
     };
   }, []);
-
-  useEffect(() => {
-    if (!mapLoaded || mapRef.current == null || activeStaticKey == null) {
-      return;
-    }
-    updateSelectedShape(
-      mapRef.current,
-      selectedShapeId,
-      loadedBigStaticData,
-      activeStaticKey,
-      setLoadedBigStaticData
-    );
-  }, [selectedShapeId, activeStaticKey, loadedBigStaticData]);
-
-  useEffect(() => {
-    if (activeStaticKey == null) {
-      return;
-    }
-    if (
-      loadedSmallStaticData == null ||
-      loadedSmallStaticData.key !== activeStaticKey
-    ) {
-      fetchSmallStaticData(activeStaticKey).then((data: SmallStaticData) => {
-        setLoadedSmallStaticData({ key: activeStaticKey, data: data });
-      });
-    }
-  }, [activeStaticKey, loadedSmallStaticData]);
-
-  const onFilterSelectionChange = (newSelection: Set<RouteId>) => {
-    const newFilterState = {
-      selection: newSelection,
-      enabled: filterStateRef.current.enabled || newSelection.size > 0,
-    };
-    setFilterState(newFilterState);
-    filterStateRef.current = newFilterState;
-    redraw();
-  };
-
-  useEffect(() => {
-    if (filterControlRef.current != null) {
-      filterControlRef.current.updateState(
-        filterState,
-        anyMarkerVisibleRef.current
-      );
-    }
-  }, [filterState]);
 
   return (
     <>
@@ -554,7 +449,15 @@ export function Map() {
           onClose={() => setShowFilter(false)}
           smallStaticData={loadedSmallStaticData?.data}
           selection={filterState.selection}
-          onSelectionChange={onFilterSelectionChange}
+          onSelectionChange={(newSelection) => {
+            const newFilterState = {
+              selection: newSelection,
+              enabled: filterStateRef.current.enabled || newSelection.size > 0,
+            };
+            setFilterState(newFilterState);
+            filterStateRef.current = newFilterState;
+            redraw();
+          }}
         />
       )}
     </>
