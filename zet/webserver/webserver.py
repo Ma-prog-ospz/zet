@@ -5,6 +5,7 @@ import argparse
 from flask import Flask
 from flask_cors import CORS
 from flask_sock import Sock
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from gtfs_server import GtfsServer
 
 # --- Flask setup ---
