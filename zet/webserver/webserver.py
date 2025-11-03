@@ -11,7 +11,7 @@ from flask_sock import Sock
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # --- Uvoz Fetcher klase ---
-from fetcher import Fetcher
+from zet.fetcher.fetcher import Fetcher
 
 # --- Flask setup ---
 app = Flask(__name__, static_folder="../static")
