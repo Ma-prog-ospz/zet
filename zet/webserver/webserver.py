@@ -4,9 +4,14 @@ import threading
 import logging
 import argparse
 import json
+from flask import send_from_directory
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_sock import Sock
+
+@app.route("/style.json")
+def serve_style():
+    return send_from_directory(os.path.join(app.root_path, "public"), "style.json")
 
 # --- Dodaj parent direktorij u sys.path da se može importati fetcher ---
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
