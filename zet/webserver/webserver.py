@@ -34,7 +34,7 @@ RouteId = int
 
 app = Flask(__name__, static_folder='../static')
 if os.environ.get('ZET_DEV') == '1':
-    CORS(app, origins=['http://localhost:3000'])
+    CORS(app, origins=['https://zet-6shc.onrender.com/'])
 sock = Sock(app)
 
 logging.basicConfig(level=logging.INFO)
@@ -672,7 +672,7 @@ def create_parser():
         help='URL of the fetcher server (default: ws://localhost:8765)')
     add('--port', type=int, default=5000,
         help='Port to run the server on (default: 5000)')
-    add('--host', default='localhost',
+    add('--host', default='0.0.0.0',
         help='Host to run the server on (default: localhost)')
     return parser
 
