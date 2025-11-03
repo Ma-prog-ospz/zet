@@ -1,5 +1,0 @@
-*.sqlite3
-/venv
-BUILD
-__pycache__
-node_modules
